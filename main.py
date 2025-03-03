@@ -10,8 +10,8 @@ import sys
 import server
 import client
 
-def start_server(server_info):
-    server.Server(server_info)
+def start_server(server_info,servers):
+    server.Server(server_info,servers)
 
 if __name__ == "__main__":
 
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         servers = json.load(file)
     for server_info in servers:
         print(server_info["db_file"])
-        Process(target=start_server, args=(server_info,)).start()
+        Process(target=start_server, args=(server_info,servers)).start()
     client_server = client.Client()
     while True:
         # Read input from the command line
