@@ -2,6 +2,8 @@ import socket
 import threading
 import json
 import time
+import hashlib
+import random
 
 
 class Client:
@@ -147,7 +149,8 @@ class Client:
                     "transaction_sourse": self.eventList[0]["transaction_sourse"],
                     "transaction_target": self.eventList[0]["transaction_target"],
                     "transaction_amount": self.eventList[0]["transaction_amount"],
-                    "command": self.eventList[0]["command"]
+                    "command": self.eventList[0]["command"],
+                    "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
                 }
                 msg = json.dumps(msg)
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -165,7 +168,8 @@ class Client:
                     "transaction_target": self.eventList[0]["transaction_target"],
                     "transaction_target_can": 0,
                     "transaction_amount": self.eventList[0]["transaction_amount"],
-                    "command": self.eventList[0]["command"]
+                    "command": self.eventList[0]["command"],
+                    "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
                 }
                 self.eventList[0]["this_sourse_port"]=this_sourse_port
                 self.eventList[0]["this_target_port"]=this_target_port
