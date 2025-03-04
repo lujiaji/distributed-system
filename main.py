@@ -26,7 +26,7 @@ if __name__ == "__main__":
     for server_info in servers:
         print(server_info["db_file"])
         Process(target=start_server, args=(server_info,servers)).start()
-    client_server = client.Client()
+    client_server = client.Client(servers)
     while True:
         # Read input from the command line
         command = input("").strip().lower()

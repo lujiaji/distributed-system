@@ -20,6 +20,7 @@ class Server:
         self.ip = server_info["ip"]
         self.port = server_info["port"]
         self.db_file = server_info["db_file"]
+        self.server_info = server_info
         self.others=[]
 
         for server_info in servers:
@@ -71,6 +72,7 @@ class Server:
                         "ip":self.ip,
                         "port":self.port
                     }
+                    message.update(self.server_info)
                     message=json.dumps(message)
                     for other in self.others:
                         my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -99,12 +101,12 @@ class Server:
                 if not data:
                     break
                 else:
-                    print(f"[{self.server_id}] listened")
+                    # print(f"[{self.server_id}] listened")
                     self.last_message_time=time.time()
                     msg_data = json.loads(data)
                     match msg_data["type"]:
-                        case "hb":
-                            print(f"[{self.server_id}] receive hb")
+                        # case "hb":
+                        #     print(f"[{self.server_id}] receive hb")
                         case "elec":
                             print(f"[{self.server_id}] receive elec,need to vote!")
                             self.vote(msg_data)
@@ -151,12 +153,13 @@ class Server:
         message={
             "type":"elec",
             "candidate_id":self.server_id,
-            "last_included_index":self.commit_index,
+            "last_included_index":self.cur_index,
             "last_included_term":self.cur_term,
             "ip":self.ip,
             "port":self.port,
             "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
             }
+        message.update(self.server_info)
         self.elec_id=message["mid"]
         self.pending_elec[message["mid"]]={
             "my_elec_mid":message["mid"],
@@ -195,6 +198,7 @@ class Server:
                 "reply_to_mid":msg["mid"],
                 "granted_vote":True
             }
+            message.update(self.server_info)
             self.leader=msg["candidate_id"]
             self.leader_exist=1
             message=json.dumps(message)
@@ -204,7 +208,7 @@ class Server:
             print(f"[{self.server_id}] granted {msg["candidate_id"]}'s election with my term:{self.cur_term}!")
             print(f"[{self.server_id}] my leader is {self.leader}")
             my_socket.close()
-        elif msg["last_included_term"]==self.cur_term and msg["last_included_index"]>self.commit_index: 
+        elif msg["last_included_term"]==self.cur_term and msg["last_included_index"]>self.cur_index: 
             self.cur_term=msg["last_included_term"]
             message={
                 "type":"vote",
@@ -213,6 +217,7 @@ class Server:
                 "reply_to_mid":msg["mid"],
                 "granted_vote":True
             }
+            message.update(self.server_info)
             self.leader=msg["candidate_id"]
             self.leader_exist=1
             message=json.dumps(message)
@@ -227,8 +232,10 @@ class Server:
                 "voter_id":self.server_id,
                 "term":self.cur_term,
                 "reply_to_mid":msg["mid"],
-                "granted_vote":False
+                "granted_vote":False,
+                "leader_id":self.leader
             }
+            message.update(self.server_info)
             self.leader=None
             self.leader_exist=0
             message=json.dumps(message)
@@ -240,7 +247,7 @@ class Server:
             self.election()
 
     def handle_vote(self,msg):
-        if msg["reply_to_mid"]==self.elec_id:
+        if msg["reply_to_mid"]==self.elec_id and self.pending_elec!={}:
             #print("111")
             if msg["granted_vote"]==True:
                 self.pending_elec[self.elec_id]["others_replied"].append(True)
@@ -248,13 +255,20 @@ class Server:
                     for i in self.pending_elec[self.elec_id]["others_replied"]:
                         if i == False:
                             print("vote fail")
+                            self.leader=msg["leader_id"]
+                            self.leader_exist=1
                             return
                     self.leader=self.server_id
                     self.leader_exist=1
-                    if len(self.pending_elec[self.elec_id]["others_replied"])==3:
-                        self.pending_elec={}
-                        self.cur_index(0)=self.cur_term
-                        print(f"[{self.server_id}] I become leader!")
+
+                    #广播给client
+                    # 为什么下面是3？？？
+                    # if len(self.pending_elec[self.elec_id]["others_replied"])==3:
+                    #     self.pending_elec={}
+                    #     self.cur_index[0]=self.cur_term
+                    #     print(f"[{self.server_id}] I become leader!")
+                    self.pending_elec={}
+                    self.cur_index[0]=self.cur_term
                 else:
                     print("not enough votes")
                     return
@@ -264,9 +278,10 @@ class Server:
         x=msg["transaction_sourse"]
         y=msg["transaction_target"]
         amt=msg["transaction_amount"]
-        if balance["x"]-amt > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
-            self.cur_index(0)=self.cur_term
-            self.cur_index(1)+=1
+        balance["x"]-=amt
+        if balance["x"] > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
+            self.cur_index[0]=self.cur_term
+            self.cur_index[1]+=1
             message={
                 "type":"request",
                 "leader_id":self.server_id,
@@ -280,6 +295,7 @@ class Server:
                 "amt":amt,
                 "mid":msg["mid"]
                 }
+            message.update(self.server_info)
             self.msg_q.append(message)
         else:
             message={
@@ -292,6 +308,7 @@ class Server:
                 "amt":amt,
                 "mid":msg["mid"]
                 }
+            message.update(self.server_info)
             message=json.dumps(message)
             #发回给router，中断
     def request_2pc(self,msg):
@@ -309,10 +326,11 @@ class Server:
                 #判断term 和index
                 if msg["last_included_index"]==self.match_index(1):
                     #！！判断上一个entry是否相同，若hb强制能更新至一致的状态，则这个判断能省略！！
-                    if balance["x"]-amt > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
+                    balance["x"]-=amt
+                    if balance["x"] > 0 > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
                         #最后判断余额
-                        self.cur_index(0)=self.cur_term
-                        self.cur_index(1)+=1
+                        self.cur_index[0]=self.cur_term
+                        self.cur_index[1]+=1
                         message={
                             "type":"reply",
                             "leader_id":self.server_id,
@@ -321,6 +339,7 @@ class Server:
                             "commit_status":True,
                             "mid":msg["mid"]
                             }
+                        message.update(self.server_info)
                         message=json.dumps(message)
                         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         client_socket.connect((msg["ip"],int(msg["port"])))

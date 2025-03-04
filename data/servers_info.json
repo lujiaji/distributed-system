@@ -19,5 +19,47 @@
         "ip": "127.0.0.1",
         "port": "5003",
         "db_file": "data/db_server_S3.json"
+    },
+    {
+        "server_id": "S4",
+        "cluster": 2,
+        "ip": "127.0.0.1",
+        "port": "5004",
+        "db_file": "data/db_server_S4.json"
+    },
+    {
+        "server_id": "S5",
+        "cluster": 2,
+        "ip": "127.0.0.1",
+        "port": "5005",
+        "db_file": "data/db_server_S5.json"
+    },
+    {
+        "server_id": "S6",
+        "cluster": 2,
+        "ip": "127.0.0.1",
+        "port": "5006",
+        "db_file": "data/db_server_S6.json"
+    },
+    {
+        "server_id": "S7",
+        "cluster": 3,
+        "ip": "127.0.0.1",
+        "port": "5007",
+        "db_file": "data/db_server_S7.json"
+    },
+    {
+        "server_id": "S8",
+        "cluster": 3,
+        "ip": "127.0.0.1",
+        "port": "5008",
+        "db_file": "data/db_server_S8.json"
+    },
+    {
+        "server_id": "S9",
+        "cluster": 3,
+        "ip": "127.0.0.1",
+        "port": "5009",
+        "db_file": "data/db_server_S9.json"
     }
 ]
