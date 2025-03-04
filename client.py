@@ -6,7 +6,8 @@ import hashlib
 import random
 
 class Client:
-    def __init__(self):
+    def __init__(self,servers):
+        self.servers = servers
         self.leader_list={
             "cluster1" : 5001,
             "cluster2" : 5004,
@@ -109,14 +110,12 @@ class Client:
                 "mid": this_event["mid"]
             }
             msg = json.dumps(msg)
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(("127.0.0.1",this_event["this_sourse_port"]))
-            client_socket.send(msg.encode())
-            client_socket.close()
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(("127.0.0.1",this_event["this_target_port"]))
-            client_socket.send(msg.encode())
-            client_socket.close()
+            for this_server in self.servers:
+                if this_server["cluster"]==this_event["this_sourse_cluster"] or this_server["cluster"]==this_event["this_target_cluster"]:
+                    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    client_socket.connect(("127.0.0.1",int(this_server["cluster"])))
+                    client_socket.send(msg.encode())
+                    client_socket.close()
             self.twoPCList.remove(this_event)
             for i in self.twoPC_waitTime:
                 if i["mid"] == msg_data["mid"]:
@@ -131,17 +130,23 @@ class Client:
 
             if 1 <= self.eventList[0]["transaction_sourse"]  <= 1000:
                 this_sourse_port = self.leader_list["cluster1"]
+                this_sourse_cluster = 1
             elif 1001 <= self.eventList[0]["transaction_sourse"]  <= 2000:
                 this_sourse_port = self.leader_list["cluster2"]
+                this_sourse_cluster = 2
             elif 2001 <= self.eventList[0]["transaction_sourse"]  <= 3000:
                 this_sourse_port = self.leader_list["cluster3"]
+                this_sourse_cluster = 3
             
             if 1 <= self.eventList[0]["transaction_target"]  <= 1000:
                 this_target_port = self.leader_list["cluster1"]
+                this_target_cluster = 1
             elif 1001 <= self.eventList[0]["transaction_target"]  <= 2000:
                 this_target_port = self.leader_list["cluster2"]
+                this_target_cluster = 2
             elif 2001 <= self.eventList[0]["transaction_target"]  <= 3000:
                 this_target_port = self.leader_list["cluster3"]
+                this_target_cluster = 3
 
             if(this_sourse_port == "" or this_target_port == ""):
                 print("No leader found")
@@ -169,14 +174,18 @@ class Client:
                     "type": "init_2PC",
                     "transaction_sourse": self.eventList[0]["transaction_sourse"],
                     "transaction_sourse_can": 0,
+                    "transaction_sourse_cluster": this_sourse_cluster,
                     "transaction_target": self.eventList[0]["transaction_target"],
                     "transaction_target_can": 0,
+                    "transaction_target_cluster": this_target_cluster,
                     "transaction_amount": self.eventList[0]["transaction_amount"],
                     "command": self.eventList[0]["command"],
                     "mid": self.eventList[0]["mid"]
                 }
                 self.eventList[0]["this_sourse_port"]=this_sourse_port
+                self.eventList[0]["this_sourse_cluster"]=this_sourse_cluster
                 self.eventList[0]["this_target_port"]=this_target_port
+                self.eventList[0]["this_target_cluster"]=this_target_cluster
                 self.twoPC_waitTime.append({"mid":msg["mid"],"time":time.time()}) 
                 msg = json.dumps(msg)
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
