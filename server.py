@@ -39,6 +39,7 @@ class Server:
         self.leader_exist=0
         self.pending_elec={}
         self.elec_id=None
+        self.msg_q=[]
 
         threading.Thread(target = lambda : self.as_leader_hb()).start()
         threading.Thread(target = lambda : self.monitor_timeout()).start()
@@ -50,7 +51,6 @@ class Server:
         self.mode = None  # "election", "normal", "C_change"
         # Persistent state, update in Storage before replying to RPC
         self.cur_term = 0  # Monotonically increase, or sync with current leader
-        #self.leader = None  # To vote and remember current leader
         # Volatile state on all servers
         self.commit_index = [0, 0]  # Committed entry index
         # Volatile state on leaders, reset after each election (specifically index)
@@ -61,21 +61,33 @@ class Server:
         
     def as_leader_hb(self):
         while True:
-            time.sleep(0.2)
+            time.sleep(0.5)
             if self.leader==self.server_id:
-                print(f"[{self.server_id}] send heartbeat")
-                message={
-                    "type":"hb",
-                    "leader_id":self.server_id,
-                    "ip":self.ip,
-                    "port":self.port
-                }
-                message=json.dumps(message)
-                for other in self.others:
+                #print(f"[{self.server_id}] send heartbeat")
+                if len(self.msg_q)==0:
+                    message={
+                        "type":"hb",
+                        "leader_id":self.server_id,
+                        "ip":self.ip,
+                        "port":self.port
+                    }
+                    message=json.dumps(message)
+                    for other in self.others:
+                        my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                        my_socket.connect((other["ip"],int(other["port"])))
+                        my_socket.send(message.encode())
+                        my_socket.close()
+                else:
                     my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-                    my_socket.connect((other["ip"],int(other["port"])))
-                    my_socket.send(message.encode())
+                    for index in range(len(self.msg_q)):
+                        msg=self.msg_q(index)
+                        msg=json.dumps(msg)
+                        for other in self.others:
+                            my_socket.connect((other["ip"],int(other["port"])))
+                            my_socket.send(message.encode())
+                            time.sleep(0.1)
                     my_socket.close()
+                    self.msg_q=[]
             else:
                 continue
             
@@ -84,8 +96,6 @@ class Server:
             client_socket, address = self.socket.accept()
             while True:
                 data = client_socket.recv(1024).decode()
-                # add delay here
-                # mySleep(self.sleepType)
                 if not data:
                     break
                 else:
@@ -101,6 +111,22 @@ class Server:
                         case "vote":
                             print(f"[{self.server_id}] receive vote!")
                             self.handle_vote(msg_data)
+                        case "init_Raft":
+                            print(f"[{self.server_id}] receive in-cluster client transaction request, handling!")
+                            self.request_raft(msg_data)
+                        case "init_2PC":
+                            print(f"[{self.server_id}] receive x-cluster client transaction request, handling!")
+                            self.request_2pc(msg_data)
+                        case "request":
+                            print(f"[{self.server_id}] receive commit request")
+                            self.reply()
+                        case "reply":
+                            print(f"[{self.server_id}] receive reply")
+                            self.valid_commit(msg_data)
+                        case "commit":
+                            print(f"[{self.server_id}] receive committed")
+                            self.committed(msg_data)
+            
                     # if (msg_data["code"] == "check_rply"):
                     #     print("check_rply")
                     # if (msg_data["code"] == "release"):
@@ -144,8 +170,6 @@ class Server:
             my_socket.connect((other["ip"],int(other["port"])))
             my_socket.send(message.encode())
             my_socket.close()
-
-        return
 
     def monitor_timeout(self):
         while True:
@@ -217,7 +241,7 @@ class Server:
 
     def handle_vote(self,msg):
         if msg["reply_to_mid"]==self.elec_id:
-            print("111")
+            #print("111")
             if msg["granted_vote"]==True:
                 self.pending_elec[self.elec_id]["others_replied"].append(True)
                 if len(self.pending_elec[self.elec_id]["others_replied"]) > 1:
@@ -229,39 +253,107 @@ class Server:
                     self.leader_exist=1
                     if len(self.pending_elec[self.elec_id]["others_replied"])==3:
                         self.pending_elec={}
+                        self.cur_index(0)=self.cur_term
                         print(f"[{self.server_id}] I become leader!")
                 else:
                     print("not enough votes")
                     return
         else:
             return
-    # def receiveMsgs(self):
-    # """Divided into three situations: "election", "normal", "C_change",
-    # Can be distinguished by the outermost key of the msg's dict
-    # if (outermost key is "normal"):
-    #     switch ("phase"):
-    #         case "request":
-    #             do sendReply()
-    #         case "reply_request":
-    #             do sendCommit()
-    #         case "committed":
-    #             do self.update()
-    # """
-
+    def request_raft(self,msg):
+        x=msg["transaction_sourse"]
+        y=msg["transaction_target"]
+        amt=msg["transaction_amount"]
+        if balance["x"]-amt > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
+            self.cur_index(0)=self.cur_term
+            self.cur_index(1)+=1
+            message={
+                "type":"request",
+                "leader_id":self.server_id,
+                "last_included_index":self.commit_index,
+                "last_included_term":self.cur_term,
+                "cur_index":self.cur_index,
+                "ip":self.ip,
+                "port":self.port,
+                "x":x,
+                "y":y,
+                "amt":amt,
+                "mid":msg["mid"]
+                }
+            self.msg_q.append(message)
+        else:
+            message={
+                "type":"abort_raft",
+                "leader_id":self.server_id,
+                "ip":self.ip,
+                "port":self.port,
+                "x":x,
+                "y":y,
+                "amt":amt,
+                "mid":msg["mid"]
+                }
+            message=json.dumps(message)
+            #发回给router，中断
+    def request_2pc(self,msg):
+        return
     # def receiveClientRequest(self):
 
     # def sendRequest(self):
 
-    def sendReply(self):
-        # if (self.storage.valid()):  # Fill it
-        #     message = Message({"""Refer to the format of normal-replyRequest"""})
-        #     message.sendTo(self.leader)
-        return
-    # def sendCommit(self):
+    def reply(self,msg):
+        x=msg["x"]
+        y=msg["y"]
+        amt=msg["amt"]
+        try:
+            if msg["cur_index"](0)>=self.cur_term and msg["cur_index"](1)>=self.cur_index:
+                #判断term 和index
+                if msg["last_included_index"]==self.match_index(1):
+                    #！！判断上一个entry是否相同，若hb强制能更新至一致的状态，则这个判断能省略！！
+                    if balance["x"]-amt > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
+                        #最后判断余额
+                        self.cur_index(0)=self.cur_term
+                        self.cur_index(1)+=1
+                        message={
+                            "type":"reply",
+                            "leader_id":self.server_id,
+                            "ip":self.ip,
+                            "port":self.port,
+                            "commit_status":True,
+                            "mid":msg["mid"]
+                            }
+                        message=json.dumps(message)
+                        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        client_socket.connect((msg["ip"],int(msg["port"])))
+                        client_socket.send(msg.encode())
+                        client_socket.close()
+                    else:raise ValueError
+                else:raise ValueError
+            else:raise ValueError
+        except ValueError as e:
+            message={
+                "type":"reply",
+                "leader_id":self.server_id,
+                "ip":self.ip,
+                "port":self.port,
+                "commit_status":False,
+                "mid":msg["mid"]
+                }
+            message=json.dumps(message)
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect((msg["ip"],int(msg["port"])))
+            client_socket.send(msg.encode())
+            client_socket.close()
+        
+
+    def sendCommit(self,msg):
         # if (committed from majority):
             # message = Message({"""Refer to the format of normal-committed"""})
             # for client in self.cluster:
             #     message.sendTo(client)
-
+        return 
     # def update(self):
         # self.storage.update()
+    def valid_commit(self,msg):
+        return
+    def committed(self,msg):
+        return
