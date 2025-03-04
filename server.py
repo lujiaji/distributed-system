@@ -53,9 +53,10 @@ class Server:
         self.cur_index = [0, 0]  # [term, index]
         self.match_index = [0, 0]  # Already replicated on server
         self.log_temp = None # 临时存储log
-        self.timeout_limit=1
+        self.timeout_limit=3
         self.last_message_time=time.time()
-        self.leader_exist=0
+        self.leader_exist=1
+        self.pending_elec={}
 
     def listening(self):
         while True:
@@ -70,8 +71,13 @@ class Server:
                 else:
                     self.last_message_time=time.time()
                     msg_data = json.loads(data)
-                    if (msg_data["type"] == "elec"):
-                        print(f"[{self.server_id}] receive elec,need to vote!")
+                    match msg_data["type"]:
+                        case "elec":
+                            print(f"[{self.server_id}] receive elec,need to vote!")
+                            self.vote(msg_data)
+                        case "vote":
+                            print(f"[{self.server_id}] receive vote!")
+                            self.handle_vote(msg_data)
                     # if (msg_data["code"] == "check_rply"):
                     #     print("check_rply")
                     # if (msg_data["code"] == "release"):
@@ -90,16 +96,20 @@ class Server:
     
     """Chain functions according to execution order"""
     def election(self):
+        self.cur_term+=1
         message={
             "type":"elec",
-            "tran":{
-                "term":self.cur_term,
-                "candidated_id":self.server_id,
-                "last_included_index":self.commit_index,
-                "last_included_term":self.cur_term+1
-                },
-            "mid":hashlib.md5(str(random.random()).encode()).hexdigest(),
+            "candidated_id":self.server_id,
+            "last_included_index":self.commit_index,
+            "last_included_term":self.cur_term,
+            "ip":self.ip,
+            "port":self.port,
+            "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
             }
+        self.pending_elec[message["mid"]]={
+            "others_replied":set(),
+            "elec_term":self.cur_term
+        }
         message=json.dumps(message)
         for other in self.others:
             my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -122,6 +132,56 @@ class Server:
                 self.leader=None
                 self.election()
 
+    def vote(self,msg):
+        #compare index term 
+        if msg["last_included_term"]>self.cur_term:
+            self.cur_term=msg["last_included_term"]
+            message={
+                "type":"vote",
+                "voter_id":self.server_id,
+                "term":self.cur_term,
+                "mid":hashlib.md5(str(random.random()).encode()).hexdigest(),
+                "granted_vote":True
+            }
+            message=json.dumps(message)
+            my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            my_socket.connect((msg["ip"],int(msg["port"])))
+            my_socket.send(message.encode())
+            print(f"[{self.server_id}] granted {msg["candidated_id"]}'s election with my term:{self.cur_term}!")
+            my_socket.close()
+        elif msg["last_included_term"]==self.cur_term and msg["last_included_index"]>self.commit_index: 
+            self.cur_term=msg["last_included_term"]
+            message={
+                "type":"vote",
+                "voter_id":self.server_id,
+                "term":self.cur_term,
+                "mid":hashlib.md5(str(random.random()).encode()).hexdigest(),
+                "granted_vote":True
+            }
+            message=json.dumps(message)
+            my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            my_socket.connect((msg["ip"],int(msg["port"])))
+            my_socket.send(message.encode())
+            print(f"[{self.server_id}] granted {msg["candidated_id"]}'s election with my term:{self.cur_term}!")
+            my_socket.close()
+        else:
+            message={
+                "type":"vote",
+                "voter_id":self.server_id,
+                "term":self.cur_term,
+                "mid":hashlib.md5(str(random.random()).encode()).hexdigest(),
+                "granted_vote":False
+            }
+            message=json.dumps(message)
+            my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            my_socket.connect((msg["ip"],int(msg["port"])))
+            my_socket.send(message.encode())
+            print(f"[{self.server_id}] rejected {msg["candidated_id"]}'s election with my term:{self.cur_term}!")
+            my_socket.close()
+
+    def handle_vote(self,msg):
+        self.pending_elec[message["mid"]]
+        return 0
     # def receiveMsgs(self):
     # """Divided into three situations: "election", "normal", "C_change",
     # Can be distinguished by the outermost key of the msg's dict
