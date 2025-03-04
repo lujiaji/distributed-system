@@ -2,7 +2,8 @@ import socket
 import threading
 import json
 import time
-
+import hashlib
+import random
 
 class Client:
     def __init__(self):
@@ -17,15 +18,14 @@ class Client:
         #     "cluster3":""
         #     }
         self.eventList = []
-        # 拆分列表！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
-        # ！@！！！！！！！！！！！！！！！
         self.twoPCList = []
+        self.raffList = []
+
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.bind(("127.0.0.1",5010))
         self.client_socket.listen(30)
-        self.twoPC_waitTime = 0
+        self.twoPC_waitTime = []
         self.timeout_limit=1
-        self.twoPC_countdown = False
 
 
         threading.Thread(target = lambda : self.listening()).start()
@@ -48,16 +48,12 @@ class Client:
                 if (msg_data["type"] == "Leader"):
                     self.update_leader_list(msg_data)
                 if (msg_data["type"] == "2pc_abort"):
-                    self.handle2PCabort(msg_data)
+                    self.send2pcAbort(msg_data)
                 if (msg_data["type"] == "2pc_can_commit"):
                     self.handle2PCcommit(msg_data)
                 if (msg_data["type"] == "commit"):
                     print("commit")
     
-    def handle2PCabort(self,msg_data):
-        if(self.eventList[0]["type"] == "2PC"):
-            print("abort 2pc")
-            self.send2pcAbort(msg_data)
             
     
     def update_leader_list(self, msg_data):
@@ -82,39 +78,49 @@ class Client:
             "transaction_sourse": transaction_sourse,
             "transaction_target": transaction_target,
             "transaction_amount": transaction_amount,
-            "command": command
+            "command": command,
+            "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
         }
         
         self.eventList.append(data)
         # print(self.eventList)
         
     def handle2PCcommit(self, msg_data):
-        if (self.eventList[0]["type"] != "2PC"):
-            if (msg_data["transaction_sourse_can"] == 1):
-                self.eventList[0]["transaction_sourse_can"] = 1
-            if (msg_data["transaction_target_can"] == 1):
-                self.eventList[0]["transaction_target_can"] = 1
-            if (self.eventList[0]["transaction_sourse_can"] == 1 and self.eventList[0]["transaction_target_can"] == 1):
-                print("do_commit")
-                msg = {
-                    "type": "2pc_commit",
-                    "transaction_sourse": self.eventList[0]["transaction_sourse"],
-                    "transaction_target": self.eventList[0]["transaction_target"],
-                    "transaction_amount": self.eventList[0]["transaction_amount"],
-                    "command": self.eventList[0]["command"]
-                }
-                msg = json.dumps(msg)
-                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client_socket.connect(("127.0.0.1",self.eventList[0]["this_sourse_port"]))
-                client_socket.send(msg.encode())
-                client_socket.close()
-                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client_socket.connect(("127.0.0.1",self.eventList[0]["this_target_port"]))
-                client_socket.send(msg.encode())
-                client_socket.close()
-                self.eventList.pop(0)
-                self.twoPC_countdown = False
-                self.twoPC_waitTime = 0
+        # if (msg_data[]
+        this_event = {}
+        for i in self.twoPCList:
+            if i["mid"] == msg_data["mid"]:
+                this_event = i
+        if this_event == {}:
+            print("handle2PCcommit No event found")
+            return
+        if (msg_data["transaction_sourse_can"] == 1):
+            this_event["transaction_sourse_can"] = 1
+        if (msg_data["transaction_target_can"] == 1):
+            this_event["transaction_target_can"] = 1
+        if (this_event["transaction_sourse_can"] == 1 and this_event["transaction_target_can"] == 1):
+            print("do_commit")
+            msg = {
+                "type": "2pc_commit",
+                "transaction_sourse": this_event["transaction_sourse"],
+                "transaction_target": this_event["transaction_target"],
+                "transaction_amount": this_event["transaction_amount"],
+                "command": this_event["command"],
+                "mid": this_event["mid"]
+            }
+            msg = json.dumps(msg)
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect(("127.0.0.1",this_event["this_sourse_port"]))
+            client_socket.send(msg.encode())
+            client_socket.close()
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect(("127.0.0.1",this_event["this_target_port"]))
+            client_socket.send(msg.encode())
+            client_socket.close()
+            self.twoPCList.remove(this_event)
+            for i in self.twoPC_waitTime:
+                if i["mid"] == msg_data["mid"]:
+                    self.twoPC_waitTime.remove(i)
 
     def handleMyEvent(self):
         while True:
@@ -147,7 +153,8 @@ class Client:
                     "transaction_sourse": self.eventList[0]["transaction_sourse"],
                     "transaction_target": self.eventList[0]["transaction_target"],
                     "transaction_amount": self.eventList[0]["transaction_amount"],
-                    "command": self.eventList[0]["command"]
+                    "command": self.eventList[0]["command"],
+                    "mid": self.eventList[0]["mid"]
                 }
                 msg = json.dumps(msg)
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -165,14 +172,14 @@ class Client:
                     "transaction_target": self.eventList[0]["transaction_target"],
                     "transaction_target_can": 0,
                     "transaction_amount": self.eventList[0]["transaction_amount"],
-                    "command": self.eventList[0]["command"]
+                    "command": self.eventList[0]["command"],
+                    "mid": self.eventList[0]["mid"]
                 }
                 self.eventList[0]["this_sourse_port"]=this_sourse_port
                 self.eventList[0]["this_target_port"]=this_target_port
+                self.twoPC_waitTime.append({"mid":msg["mid"],"time":time.time()}) 
                 msg = json.dumps(msg)
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.twoPC_waitTime = time.time()
-                self.twoPC_countdown = True
                 client_socket.connect(("127.0.0.1",this_sourse_port))
                 client_socket.send(msg.encode())
                 client_socket.close()
@@ -181,50 +188,66 @@ class Client:
                 client_socket.send(msg.encode())
                 client_socket.close()
                 self.eventList[0]["type"] = "2PC"
+                self.twoPCList.append(self.eventList[0])
+                self.eventList.pop(0)
                 print("init_2PC sent")
 
     def monitor_2PC_timeout(self):
         while True:
-            if self.twoPC_countdown == True:
-                if self.eventList[0]["type"] != "2PC":
-                    print("monitor_2PC_timeout not 2pc event!!!")
+            if self.twoPC_waitTime != []:
                 time.sleep(0.1)
-                time_gap=time.time()-self.twoPC_waitTime
-                if time_gap>self.timeout_limit:
-                    print("time out, send abort 2pc")
-                    msg_data = {}
-                    self.send2pcAbort(msg_data)
+                for i in self.twoPC_waitTime:
+                    time_gap=time.time()-i["time"]
+                    if time_gap>self.timeout_limit:
+                        print("time out, send abort 2pc")
+                        msg_data = {}
+                        mid = i["mid"]
+                        self.send2pcAbort(msg_data,mid)
 
-    def send2pcAbort(self,msg_data):
-        if self.eventList[0]["type"] != "2PC":
-            print("send2pcAbort not 2pc event!!!")
+    def send2pcAbort(self,msg_data, mid):
+        this_event = {}
+        this_mid = ""
+        for i in self.twoPCList:
+            if mid != {} and i["mid"] == mid:
+                this_event = i
+                this_mid = i["mid"]
+            else:
+                if msg_data != {} and i["mid"] == msg_data["mid"]:
+                    this_event = i
+                    this_mid = i["mid"]
+
+        if this_event == {}:
+            print("send2pcAbort No event found")
+            return
+        print("------------------send2pcAbort------------------")
+        print(self.twoPCList)
         msg = {
                 "type": "2pc_abort",
-                "transaction_sourse": self.eventList[0]["transaction_sourse"],
-                "transaction_target": self.eventList[0]["transaction_target"],
-                "transaction_amount": self.eventList[0]["transaction_amount"],
-                "command": self.eventList[0]["command"]
+                "transaction_sourse": this_event["transaction_sourse"],
+                "transaction_target": this_event["transaction_target"],
+                "transaction_amount": this_event["transaction_amount"],
+                "command": this_event["command"],
+                "mid": this_event["mid"]
             }
         msg = json.dumps(msg)
         if msg_data == {}:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.twoPC_waitTime = time.time()
-            self.twoPC_countdown = True
-            client_socket.connect(("127.0.0.1",self.eventList[0]["this_sourse_port"]))
+            client_socket.connect(("127.0.0.1",this_event["this_sourse_port"]))
             client_socket.send(msg.encode())
             client_socket.close()
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(("127.0.0.1",self.eventList[0]["this_target_port"]))
+            client_socket.connect(("127.0.0.1",this_event["this_target_port"]))
             client_socket.send(msg.encode())
             client_socket.close()
         else:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            if (msg_data["abort_server"] == self.eventList[0]["this_sourse_port"]):
-                client_socket.connect(("127.0.0.1",self.eventList[0]["this_target_port"]))
-            if (msg_data["abort_server"] == self.eventList[0]["this_target_port"]):
-                client_socket.connect(("127.0.0.1",self.eventList[0]["this_sourse_port"]))
+            if (msg_data["abort_server"] == this_event["this_sourse_port"]):
+                client_socket.connect(("127.0.0.1",this_event["this_target_port"]))
+            if (msg_data["abort_server"] == this_event["this_target_port"]):
+                client_socket.connect(("127.0.0.1",this_event["this_sourse_port"]))
             client_socket.send(msg.encode())
             client_socket.close()
-        self.eventList.pop(0)
-        self.twoPC_countdown = False
-        self.twoPC_waitTime = 0
+        self.twoPCList.remove(this_event)
+        for i in self.twoPC_waitTime:
+            if i["mid"] == this_mid:
+                self.twoPC_waitTime.remove(i)
