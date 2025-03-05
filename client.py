@@ -20,7 +20,8 @@ class Client:
         #     }
         self.eventList = []
         self.twoPCList = []
-        self.raffList = []
+        self.raftListTime = []
+        self.messageTime=[]
 
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.bind(("127.0.0.1",5010))
@@ -53,6 +54,11 @@ class Client:
                 if (msg_data["type"] == "2pc_can_commit"):
                     self.handle2PCcommit(msg_data)
                 if (msg_data["type"] == "commit"):
+                    for e in self.raftListTime:
+                        if e["mid"]==msg_data["mid"]:
+                            msg_time=time.time()-e["init_time"]
+                            self.messageTime.append(msg_time)
+                            self.raftListTime.remove(e)
                     print("commit")
     
             
@@ -119,6 +125,8 @@ class Client:
             self.twoPCList.remove(this_event)
             for i in self.twoPC_waitTime:
                 if i["mid"] == msg_data["mid"]:
+                    msg_time=time.time()-i["time"]
+                    self.messageTime.append(msg_time)
                     self.twoPC_waitTime.remove(i)
 
     def handleMyEvent(self):
@@ -167,6 +175,7 @@ class Client:
                 client_socket.send(msg.encode())
                 client_socket.close()
                 print("init_Raft sent")
+                self.raftListTime.append({"mid":msg["mid"],"init_time":time.time()})
                 self.eventList.pop(0)
                 print(self.eventList)
             else:
@@ -197,6 +206,7 @@ class Client:
                 client_socket.send(msg.encode())
                 client_socket.close()
                 self.eventList[0]["type"] = "2PC"
+                self.eventList[0]["init_time"] = time.time()
                 self.twoPCList.append(self.eventList[0])
                 self.eventList.pop(0)
                 print("init_2PC sent")
