@@ -35,12 +35,14 @@ class Server:
         self.socket.bind((self.ip,int(self.port)))
         self.socket.listen(30)
         self.leader = None
-        self.timeout_limit=random.uniform(2, 3)
+        self.timeout_limit=random.uniform(1, 2)
         self.last_message_time=time.time()
         self.leader_exist=0
         self.pending_elec={}
         self.elec_id=None
         self.msg_q=[]
+        self.currrent_vote_term=0
+        self.cur_term = 0
 
         threading.Thread(target = lambda : self.as_leader_hb()).start()
         threading.Thread(target = lambda : self.monitor_timeout()).start()
@@ -51,11 +53,14 @@ class Server:
 
         self.mode = None  # "election", "normal", "C_change"
         # Persistent state, update in Storage before replying to RPC
-        self.cur_term = 0  # Monotonically increase, or sync with current leader
+          # Monotonically increase, or sync with current leader
         # Volatile state on all servers
         self.commit_index = [0, 0]  # Committed entry index
         # Volatile state on leaders, reset after each election (specifically index)
         self.cur_index = [0, 0]  # [term, index]
+        # if self.server_id in ["S1","S4","S9"]:
+        #     self.cur_term = 1
+
         self.match_index = [0, 0]  # Already replicated on server
         self.log_temp = None # 临时存储log
 
@@ -70,7 +75,8 @@ class Server:
                         "type":"hb",
                         "leader_id":self.server_id,
                         "ip":self.ip,
-                        "port":self.port
+                        "port":self.port,
+                        "index":self.cur_index
                     }
                     message.update(self.server_info)
                     message=json.dumps(message)
@@ -90,6 +96,7 @@ class Server:
                             time.sleep(0.1)
                     my_socket.close()
                     self.msg_q=[]
+                self.last_message_time=time.time()
             else:
                 continue
             
@@ -102,11 +109,15 @@ class Server:
                     break
                 else:
                     # print(f"[{self.server_id}] listened")
-                    self.last_message_time=time.time()
                     msg_data = json.loads(data)
+                    if "server_id" in msg_data and msg_data["server_id"] == self.leader:
+                        self.last_message_time=time.time()
                     match msg_data["type"]:
-                        # case "hb":
-                        #     print(f"[{self.server_id}] receive hb")
+                        case "hb":
+                            print(f"[{self.server_id}] receive hb")
+                            self.checkHb(msg_data)
+                        case "you_are_not_leader":
+                            self.stepDown(msg_data)
                         case "elec":
                             print(f"[{self.server_id}] receive elec,need to vote!")
                             self.vote(msg_data)
@@ -189,7 +200,14 @@ class Server:
 
     def vote(self,msg):
         #compare index term 
-        if msg["last_included_term"]>self.cur_term:
+        this_vote = True
+        if self.currrent_vote_term < msg["last_included_term"]:
+            self.currrent_vote_term = msg["last_included_term"]
+        else:
+            this_vote = False
+        
+        if msg["last_included_term"]>self.cur_term and this_vote == True:
+            self.last_message_time=time.time()
             self.cur_term=msg["last_included_term"]
             message={
                 "type":"vote",
@@ -208,7 +226,8 @@ class Server:
             print(f"[{self.server_id}] granted {msg["candidate_id"]}'s election with my term:{self.cur_term}!")
             print(f"[{self.server_id}] my leader is {self.leader}")
             my_socket.close()
-        elif msg["last_included_term"]==self.cur_term and msg["last_included_index"]>self.cur_index: 
+        elif msg["last_included_term"]==self.cur_term and msg["last_included_index"]>self.cur_index and this_vote == True: 
+            self.last_message_time=time.time()
             self.cur_term=msg["last_included_term"]
             message={
                 "type":"vote",
@@ -224,9 +243,10 @@ class Server:
             my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
             my_socket.connect((msg["ip"],int(msg["port"])))
             my_socket.send(message.encode())
-            print(f"[{self.server_id}] granted {msg["candidated_id"]}'s election with my term:{self.cur_term}!")
+            print(f"[{self.server_id}] granted {msg["candidate_id"]}'s election with my term:{self.cur_term}!")
             my_socket.close()
         else:
+            self.currrent_vote_term -= 1
             message={
                 "type":"vote",
                 "voter_id":self.server_id,
@@ -236,15 +256,14 @@ class Server:
                 "leader_id":self.leader
             }
             message.update(self.server_info)
-            self.leader=None
-            self.leader_exist=0
             message=json.dumps(message)
             my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
             my_socket.connect((msg["ip"],int(msg["port"])))
             my_socket.send(message.encode())
             print(f"[{self.server_id}] rejected {msg["candidate_id"]}'s election with my term:{self.cur_term}!")
             my_socket.close()
-            self.election()
+            if(self.leader==None and self.leader_exist==0):
+                self.election()
 
     def handle_vote(self,msg):
         if msg["reply_to_mid"]==self.elec_id and self.pending_elec!={}:
@@ -252,16 +271,20 @@ class Server:
             if msg["granted_vote"]==True:
                 self.pending_elec[self.elec_id]["others_replied"].append(True)
                 if len(self.pending_elec[self.elec_id]["others_replied"]) > 1:
-                    for i in self.pending_elec[self.elec_id]["others_replied"]:
-                        if i == False:
-                            print("vote fail")
-                            self.leader=msg["leader_id"]
-                            self.leader_exist=1
-                            return
                     self.leader=self.server_id
                     self.leader_exist=1
-
                     #广播给client
+                    message={
+                        "type":"leader",
+                        "leader_port":self.port,
+                    }
+                    message.update(self.server_info)
+                    message=json.dumps(message)
+                    my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                    my_socket.connect(("127.0.0.1",5010))
+                    my_socket.send(message.encode())
+                    my_socket.close()
+
                     # 为什么下面是3？？？
                     # if len(self.pending_elec[self.elec_id]["others_replied"])==3:
                     #     self.pending_elec={}
@@ -272,8 +295,52 @@ class Server:
                 else:
                     print("not enough votes")
                     return
+            else:
+                self.leader=msg["leader_id"]
+                if self.leader!=None:
+                    self.leader_exist=1
+                self.pending_elec={}
+                print("vote fail")
+                return
         else:
             return
+    
+    # message={
+    #     "type":"hb",
+    #     "leader_id":self.server_id,
+    #     "ip":self.ip,
+    #     "port":self.port,
+    #     "index":self.cur_index
+    # }
+    # message.update(self.server_info)
+
+    def checkHb(self,msg):
+        checkFail = False
+        if msg["index"][0] < self.cur_term:
+            checkFail= True
+        if msg["index"][0] == self.cur_term and msg["index"][1] < self.cur_index[1]:
+            checkFail= True
+        if checkFail== True:
+            massage = {
+                "type":"you_are_not_leader",
+                "leader_id":self.leader,
+                "ip":self.ip,
+                "port":self.port
+            }
+            massage.update(self.server_info)
+            massage=json.dumps(massage)
+            my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            my_socket.connect((msg["ip"],int(msg["port"])))
+            my_socket.send(massage.encode())
+            my_socket.close()
+
+    def stepDown(self, msg):
+        self.leader = msg["leader_id"]
+        if self.leader != None:
+            self.leader_exist = 1
+        print(f"[{self.server_id}] OK I step down because of {msg["server_id"]}!")
+        
+        
     def request_raft(self,msg):
         x=msg["transaction_sourse"]
         y=msg["transaction_target"]
