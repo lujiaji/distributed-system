@@ -8,16 +8,16 @@ import random
 class Client:
     def __init__(self,servers):
         self.servers = servers
-        self.leader_list={
-            "cluster1" : 5001,
-            "cluster2" : 5004,
-            "cluster3" : 5007
-            }
         # self.leader_list={
-        #     "cluster1":"",
-        #     "cluster2":"",
-        #     "cluster3":""
+        #     "cluster1" : 5001,
+        #     "cluster2" : 5004,
+        #     "cluster3" : 5007
         #     }
+        self.leader_list={
+            "cluster1":"",
+            "cluster2":"",
+            "cluster3":""
+            }
         self.eventList = []
         self.twoPCList = []
         self.raftListTime = []
@@ -47,10 +47,12 @@ class Client:
                 if not data:
                     break
                 msg_data = json.loads(data)
-                if (msg_data["type"] == "Leader"):
+                if (msg_data["type"] == "leader"):
                     self.update_leader_list(msg_data)
+                if (msg_data["type"] == "abort_raft"):
+                    self.sendRaftAbort(msg_data)
                 if (msg_data["type"] == "2pc_abort"):
-                    self.send2pcAbort(msg_data)
+                    self.send2pcAbort(msg_data,None)
                 if (msg_data["type"] == "2pc_can_commit"):
                     self.handle2PCcommit(msg_data)
                 if (msg_data["type"] == "commit"):
@@ -64,12 +66,13 @@ class Client:
             
     
     def update_leader_list(self, msg_data):
-        if msg_data["cluster"] == "cluster1":
-            self.leader_list["cluster1"] = msg_data["leader_port"]
-        if msg_data["cluster"] == "cluster2":
-            self.leader_list["cluster2"] = msg_data["leader_port"]
-        if msg_data["cluster"] == "cluster3":
-            self.leader_list["cluster3"] = msg_data["leader_port"]
+        if msg_data["cluster"] == 1:
+            self.leader_list["cluster1"] = int(msg_data["leader_port"])
+        if msg_data["cluster"] == 2:
+            self.leader_list["cluster2"] = int(msg_data["leader_port"])
+        if msg_data["cluster"] == 3:
+            self.leader_list["cluster3"] = int(msg_data["leader_port"])
+        print(self.leader_list)
 
     def initTransactionMessage(self,command):
         if len(command) != 3:
@@ -119,7 +122,7 @@ class Client:
             for this_server in self.servers:
                 if this_server["cluster"]==this_event["this_sourse_cluster"] or this_server["cluster"]==this_event["this_target_cluster"]:
                     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    client_socket.connect(("127.0.0.1",int(this_server["cluster"])))
+                    client_socket.connect(("127.0.0.1",int(this_server["port"])))
                     client_socket.send(msg.encode())
                     client_socket.close()
             self.twoPCList.remove(this_event)
@@ -169,13 +172,13 @@ class Client:
                     "command": self.eventList[0]["command"],
                     "mid": self.eventList[0]["mid"]
                 }
+                self.raftListTime.append({"mid":msg["mid"],"init_time":time.time()})
                 msg = json.dumps(msg)
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client_socket.connect(("127.0.0.1",this_sourse_port))
                 client_socket.send(msg.encode())
                 client_socket.close()
                 print("init_Raft sent")
-                self.raftListTime.append({"mid":msg["mid"],"init_time":time.time()})
                 self.eventList.pop(0)
                 print(self.eventList)
             else:
@@ -222,12 +225,25 @@ class Client:
                         msg_data = {}
                         mid = i["mid"]
                         self.send2pcAbort(msg_data,mid)
+    def sendRaftAbort(self,msg_data):
+        this_event = {}
+        this_mid = ""
+        for i in self.raftListTime:
+            if "mid" in msg_data and i["mid"] == msg_data["mid"]:
+                this_event = i
+                this_mid = i["mid"]
+
+        if this_event == {}:
+            print("send2pcAbort No event found")
+            return
+        self.raftListTime.remove(this_event)
+        print("------------------Client side RaftAbort------------------")
 
     def send2pcAbort(self,msg_data, mid):
         this_event = {}
         this_mid = ""
         for i in self.twoPCList:
-            if mid != {} and i["mid"] == mid:
+            if mid != None and i["mid"] == mid:
                 this_event = i
                 this_mid = i["mid"]
             else:
@@ -270,3 +286,11 @@ class Client:
         for i in self.twoPC_waitTime:
             if i["mid"] == this_mid:
                 self.twoPC_waitTime.remove(i)
+
+
+# 精简log传输
+# raft内同步
+# 更改2pc commit
+# abort后的log修剪
+# 杀死、partition、恢复
+# concurrent

@@ -15,6 +15,8 @@ import random
 class Server:
     def __init__(self, server_info,servers):
         # Initialize some parameters
+        self.crashed = False
+        self.partitioned_with = []
         self.server_id = server_info["server_id"]
         self.cluster = server_info["cluster"]  # Needs to be initialized
         self.ip = server_info["ip"]
@@ -42,7 +44,13 @@ class Server:
         self.elec_id=None
         self.msg_q=[]
         self.currrent_vote_term=0
+
         self.cur_term = 0
+        self.commit_index = [0, 0]
+        self.cur_index = [0, 0]
+        self.logList = []
+        self.commited_logList = []
+        self.initLog()
 
         threading.Thread(target = lambda : self.as_leader_hb()).start()
         threading.Thread(target = lambda : self.monitor_timeout()).start()
@@ -50,20 +58,20 @@ class Server:
 
         
         #------------ 以上已完成初始化，以下是需要实现的 ------------
-
-        self.mode = None  # "election", "normal", "C_change"
-        # Persistent state, update in Storage before replying to RPC
-          # Monotonically increase, or sync with current leader
-        # Volatile state on all servers
-        self.commit_index = [0, 0]  # Committed entry index
-        # Volatile state on leaders, reset after each election (specifically index)
-        self.cur_index = [0, 0]  # [term, index]
-        # if self.server_id in ["S1","S4","S9"]:
-        #     self.cur_term = 1
-
         self.match_index = [0, 0]  # Already replicated on server
-        self.log_temp = None # 临时存储log
+        # self.log_temp = None # 临时存储log
 
+# "1":{"x":"s1","y":"s2","amt":5},"2":{"x":"s4","y":"s5","amt":1}}, "data": {"1": {"customer_id": 1, "balance": 10}, "2": {"customer_id": 2, "balance": 10}}}
+    def initLog(self):
+        self.logList = self.log_db.all()
+        self.commited_logList = self.log_db.all()
+        if len(self.logList) == 0:
+            return
+        else:
+            self.cur_term = self.logList[0]["term"]
+            self.commit_index[0] = self.cur_term
+            self.commit_index[1] = len(self.logList)
+            self.cur_index = self.commit_index
         
     def as_leader_hb(self):
         while True:
@@ -76,7 +84,10 @@ class Server:
                         "leader_id":self.server_id,
                         "ip":self.ip,
                         "port":self.port,
-                        "index":self.cur_index
+                        "cur_index":self.cur_index,
+                        "commit_index":self.commit_index
+                        # "commited_log_list":self.commited_logList,
+                        # "log_list":self.logList
                     }
                     message.update(self.server_info)
                     message=json.dumps(message)
@@ -86,15 +97,17 @@ class Server:
                         my_socket.send(message.encode())
                         my_socket.close()
                 else:
-                    my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                     for index in range(len(self.msg_q)):
-                        msg=self.msg_q(index)
+                        msg=self.msg_q[index]
                         msg=json.dumps(msg)
                         for other in self.others:
+                            my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                             my_socket.connect((other["ip"],int(other["port"])))
-                            my_socket.send(message.encode())
+                            print(f"[{self.server_id}] send msg to {other['server_id']}")
+                            print(other["ip"],int(other["port"]))
+                            my_socket.send(msg.encode())
+                            my_socket.close()
                             time.sleep(0.1)
-                    my_socket.close()
                     self.msg_q=[]
                 self.last_message_time=time.time()
             else:
@@ -104,7 +117,7 @@ class Server:
         while True:
             client_socket, address = self.socket.accept()
             while True:
-                data = client_socket.recv(1024).decode()
+                data = client_socket.recv(4096).decode()
                 if not data:
                     break
                 else:
@@ -112,33 +125,44 @@ class Server:
                     msg_data = json.loads(data)
                     if "server_id" in msg_data and msg_data["server_id"] == self.leader:
                         self.last_message_time=time.time()
+                    if self.crashed:
+                        continue
+                    # if "server_id" in msg_data and msg_data["server_id"] == 'S2':
+                    #     print(f"[{self.server_id}] receive msg from {msg_data['server_id']}, {msg_data['type']}")
                     match msg_data["type"]:
                         case "hb":
-                            print(f"[{self.server_id}] receive hb")
+                            # print(f"[{self.server_id}] receive hb")
                             self.checkHb(msg_data)
                         case "you_are_not_leader":
                             self.stepDown(msg_data)
                         case "elec":
-                            print(f"[{self.server_id}] receive elec,need to vote!")
+                            # print(f"[{self.server_id}] receive elec,need to vote!")
                             self.vote(msg_data)
                         case "vote":
-                            print(f"[{self.server_id}] receive vote!")
+                            # print(f"[{self.server_id}] receive vote!")
                             self.handle_vote(msg_data)
                         case "init_Raft":
                             print(f"[{self.server_id}] receive in-cluster client transaction request, handling!")
-                            self.request_raft(msg_data)
+                            self.request(msg_data,"raft")
                         case "init_2PC":
                             print(f"[{self.server_id}] receive x-cluster client transaction request, handling!")
-                            self.request_2pc(msg_data)
+                            self.request(msg_data,"2pc")
                         case "request":
-                            print(f"[{self.server_id}] receive commit request")
-                            self.reply()
+                            # print(f"[{self.server_id}] receive commit request")
+                            self.reply(msg_data)
                         case "reply":
                             print(f"[{self.server_id}] receive reply")
-                            self.valid_commit(msg_data)
+                            self.sendCommit(msg_data)
                         case "commit":
                             print(f"[{self.server_id}] receive committed")
                             self.committed(msg_data)
+                        case "need_log":
+                            print(f"[{self.server_id}] receive need_log")
+                            self.sendLog(msg_data)
+                        case "log":
+                            print(f"[{self.server_id}] receive log")
+                            self.updateLog(msg_data)
+                        
             
                     # if (msg_data["code"] == "check_rply"):
                     #     print("check_rply")
@@ -209,6 +233,7 @@ class Server:
         if msg["last_included_term"]>self.cur_term and this_vote == True:
             self.last_message_time=time.time()
             self.cur_term=msg["last_included_term"]
+            self.cur_index[0]=msg["last_included_term"]
             message={
                 "type":"vote",
                 "voter_id":self.server_id,
@@ -229,6 +254,7 @@ class Server:
         elif msg["last_included_term"]==self.cur_term and msg["last_included_index"]>self.cur_index and this_vote == True: 
             self.last_message_time=time.time()
             self.cur_term=msg["last_included_term"]
+            self.cur_index=msg["last_included_index"]
             message={
                 "type":"vote",
                 "voter_id":self.server_id,
@@ -316,11 +342,12 @@ class Server:
 
     def checkHb(self,msg):
         checkFail = False
-        if msg["index"][0] < self.cur_term:
+        if msg["cur_index"][0] < self.cur_term:
             checkFail= True
-        if msg["index"][0] == self.cur_term and msg["index"][1] < self.cur_index[1]:
+        if msg["cur_index"][0] == self.cur_term and msg["cur_index"][1] < self.cur_index[1]:
             checkFail= True
         if checkFail== True:
+            print(f"[{self.server_id}] you are not leader, you step down!")
             massage = {
                 "type":"you_are_not_leader",
                 "leader_id":self.leader,
@@ -333,22 +360,139 @@ class Server:
             my_socket.connect((msg["ip"],int(msg["port"])))
             my_socket.send(massage.encode())
             my_socket.close()
+        else:
+            self.checkLogConsistency(msg)
+            return
+
+
+# message={
+#     "type":"hb",
+#     "leader_id":self.server_id,
+#     "ip":self.ip,
+#     "port":self.port,
+#     "cur_index":self.cur_index,
+#     "commit_index":self.commit_index,
+#     "commited_log_list":self.commited_logList,
+#     "log_list":self.logList
+# }
+
+    def checkLogConsistency(self,msg):
+        # print(f"[{self.server_id}] check log consistency")
+        # if self.logList != msg["log_list"]:
+        #     print(f"[{self.server_id}] logList is not consistent")
+        if self.cur_index != msg["cur_index"]:
+            print(f"[{self.server_id}] cur_index is not consistent")
+            print(f"[{self.server_id}] my cur_index: {self.cur_index}, his cur_index: {msg['cur_index']}")
+            massage = {
+                "type":"need_log",
+                "follower_id":self.server_id,
+                "ip":self.ip,
+                "port":self.port
+            }
+            massage.update(self.server_info)
+            massage=json.dumps(massage)
+            my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            my_socket.connect((msg["ip"],int(msg["port"])))
+            my_socket.send(massage.encode())
+            my_socket.close()
+
+    def sendLog(self,msg):
+        message={
+            "type":"log",
+            "leader_id":self.server_id,
+            "ip":self.ip,
+            "port":self.port,
+            "cur_index":self.cur_index,
+            "commit_index":self.commit_index,
+            "commited_log_list":self.commited_logList,
+            "log_list":self.logList
+        }
+        message.update(self.server_info)
+        message=json.dumps(message)
+        my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        my_socket.connect((msg["ip"],int(msg["port"])))
+        my_socket.send(message.encode())
+        my_socket.close()
+
+
+    def updateLog(self,msg):
+        self.cur_index = msg["cur_index"]
+        self.logList = msg["log_list"]
+        commited_logs_to_be_done = []
+        if len(msg["commited_log_list"]) == 0:
+            return
+        # for i in range(msg["commit_index"][1]+1):
+        #     if self.commited_logList[i] != msg["commited_log_list"][i]:
+        #         commited_logs_to_be_done.append(i)
+        i = len(self.commited_logList) - 1
+        while i < len(msg["commited_log_list"]):
+            self.commited_logList.append(msg["commited_log_list"][i])
+            i += 1
+        for i in commited_logs_to_be_done:
+            self.excuteLog(i)
+        return
+    
+    def excuteLog(self,log):
+        self.commited_logList.append(log)
+        self.commit_index[0]=log["term"]
+        self.commit_index[1]+=1
+        query = Query()
+        if log["transaction_type"]=="raft":
+            x_balance = self.data_db.search(query.customer_id == log['x'])[0]['balance'] - log['amt']
+            y_balance = self.data_db.search(query.customer_id == log['y'])[0]['balance'] + log['amt']
+            self.data_db.update({'balance': x_balance}, query.customer_id == log['x'])
+            self.data_db.update({'balance': y_balance}, query.customer_id == log['y'])
+        else:
+            if self.cluster == 1:
+                this_range = range(1,1000)
+            elif self.cluster == 2:
+                this_range = range(1001,2000)
+            elif self.cluster == 3:
+                this_range = range(2001,3000)
+            if log['x'] in this_range:
+                x_balance = self.data_db.search(query.customer_id == log['x'])[0]['balance'] - log['amt']
+                self.data_db.update({'balance': x_balance}, query.customer_id == log['x'])
+            elif log['y'] in this_range:
+                y_balance = self.data_db.search(query.customer_id == log['y'])[0]['balance'] + log['amt']
+                self.data_db.update({'balance': y_balance}, query.customer_id == log['y'])
+        self.log_db.insert(log)
+        print(f"[{self.server_id}] excute log: {log}")
+        print(self.commited_logList)
+        print(self.commit_index)
+        return
 
     def stepDown(self, msg):
+        print(f"[{self.server_id}] I step down because of {msg["server_id"]}!")
         self.leader = msg["leader_id"]
         if self.leader != None:
             self.leader_exist = 1
         print(f"[{self.server_id}] OK I step down because of {msg["server_id"]}!")
         
         
-    def request_raft(self,msg):
+    def request(self,msg,transaction_type):
+        print(msg)
         x=msg["transaction_sourse"]
         y=msg["transaction_target"]
         amt=msg["transaction_amount"]
-        balance["x"]-=amt
-        if balance["x"] > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
+        query = Query()
+        x_data = self.data_db.search(query.customer_id == x)[0]
+        # print(x_data)
+        new_x_ballance = x_data["balance"]-amt
+        if new_x_ballance > 0:
             self.cur_index[0]=self.cur_term
             self.cur_index[1]+=1
+            this_log={
+                "term":self.cur_term,
+                "index":self.cur_index,
+                "x":x,
+                "y":y,
+                "amt":amt,
+                "commit_status":False,
+                "vote_num":1,
+                "mid":msg["mid"],
+                "transaction_type":transaction_type
+            }
+            self.logList.append(this_log)
             message={
                 "type":"request",
                 "leader_id":self.server_id,
@@ -360,10 +504,13 @@ class Server:
                 "x":x,
                 "y":y,
                 "amt":amt,
-                "mid":msg["mid"]
+                "mid":msg["mid"],
+                "transaction_type":transaction_type,
+                "logList":self.logList
                 }
             message.update(self.server_info)
             self.msg_q.append(message)
+            print(f"[{self.server_id}] in request log: {self.logList}, index: {self.cur_index}")
         else:
             message={
                 "type":"abort_raft",
@@ -377,43 +524,63 @@ class Server:
                 }
             message.update(self.server_info)
             message=json.dumps(message)
-            #发回给router，中断
-    def request_2pc(self,msg):
+            print(f"[{self.server_id}] abort transaction")
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect(("127.0.0.1",5010))
+            client_socket.send(message.encode())
+            client_socket.close()
+            return
         return
-    # def receiveClientRequest(self):
+            #发回给router，中断
 
-    # def sendRequest(self):
+# message={
+#                 "type":"request",
+#                 "leader_id":self.server_id,
+#                 "last_included_index":self.commit_index,
+#                 "last_included_term":self.cur_term,
+#                 "cur_index":self.cur_index,
+#                 "ip":self.ip,
+#                 "port":self.port,
+#                 "x":x,
+#                 "y":y,
+#                 "amt":amt,
+#                 "mid":msg["mid"],
+#                 "transaction_type":transaction_type
+#                 }
 
     def reply(self,msg):
+        # print(f"[{self.server_id}] receive commit request from {msg["server_id"]}")
         x=msg["x"]
         y=msg["y"]
         amt=msg["amt"]
         try:
-            if msg["cur_index"](0)>=self.cur_term and msg["cur_index"](1)>=self.cur_index:
+            if msg["cur_index"][0]>=self.cur_term and msg["cur_index"][1]>=self.cur_index[1]:
                 #判断term 和index
-                if msg["last_included_index"]==self.match_index(1):
+                # if msg["last_included_index"]==self.match_index(1):
                     #！！判断上一个entry是否相同，若hb强制能更新至一致的状态，则这个判断能省略！！
-                    balance["x"]-=amt
-                    if balance["x"] > 0 > 0:#!!!!!!!!!需要实现！！！！！！！！！！！
-                        #最后判断余额
-                        self.cur_index[0]=self.cur_term
-                        self.cur_index[1]+=1
-                        message={
-                            "type":"reply",
-                            "leader_id":self.server_id,
-                            "ip":self.ip,
-                            "port":self.port,
-                            "commit_status":True,
-                            "mid":msg["mid"]
-                            }
-                        message.update(self.server_info)
-                        message=json.dumps(message)
-                        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        client_socket.connect((msg["ip"],int(msg["port"])))
-                        client_socket.send(msg.encode())
-                        client_socket.close()
-                    else:raise ValueError
+                query = Query()
+                x_data = self.data_db.search(query.customer_id == x)[0]
+                # print(x_data)
+                new_x_ballance = x_data["balance"]-amt
+                if new_x_ballance > 0:
+                    #最后判断余额
+                    self.cur_index=msg["cur_index"]
+                    message={
+                        "type":"reply",
+                        "leader_id":self.server_id,
+                        "ip":self.ip,
+                        "port":self.port,
+                        "commit_status":True,
+                        "mid":msg["mid"]
+                        }
+                    message.update(self.server_info)
+                    message=json.dumps(message)
+                    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    client_socket.connect((msg["ip"],int(msg["port"])))
+                    client_socket.send(message.encode())
+                    client_socket.close()
                 else:raise ValueError
+                # else:raise ValueError
             else:raise ValueError
         except ValueError as e:
             message={
@@ -429,17 +596,50 @@ class Server:
             client_socket.connect((msg["ip"],int(msg["port"])))
             client_socket.send(msg.encode())
             client_socket.close()
+        print(f"[{self.server_id}] in reply log: {self.logList}, index: {self.cur_index}")
         
-
+# this_log={
+#     "term":self.cur_term,
+#     "index":self.cur_index,
+#     "x":x,
+#     "y":y,
+#     "amt":amt,
+#     "commit_status":False,
+#     "vote_num":1,
+#     "mid":msg["mid"],
+#     "transaction_type":transaction_type
+# }
     def sendCommit(self,msg):
         # if (committed from majority):
             # message = Message({"""Refer to the format of normal-committed"""})
             # for client in self.cluster:
             #     message.sendTo(client)
+        for log in self.logList:
+            if log["mid"]==msg["mid"]:
+                log["vote_num"]+=1
+        for log in self.logList:
+            if log["vote_num"]>=2 and log["commit_status"]==False:
+                log["commit_status"]=True
+                message={
+                    "type":"commit",
+                    "leader_id":self.server_id,
+                    "ip":self.ip,
+                    "port":self.port,
+                    "mid":msg["mid"]
+                }
+                message.update(self.server_info)
+                message=json.dumps(message)
+                for other in self.others:
+                    my_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                    my_socket.connect((other["ip"],int(other["port"])))
+                    my_socket.send(message.encode())
+                    my_socket.close()
+                    self.excuteLog(log)
+                    print(f"[{self.server_id}] in commit log: {self.logList}, index: {self.cur_index}")
+                    return
         return 
     # def update(self):
         # self.storage.update()
-    def valid_commit(self,msg):
-        return
+
     def committed(self,msg):
         return
