@@ -9,9 +9,38 @@ import random
 import sys
 import server
 import client
+from tinydb import TinyDB, Query
 
 def start_server(server_info,servers):
     server.Server(server_info,servers)
+
+def PrintBalance(client_id):
+    numeric_str = ''.join(filter(str.isdigit, client_id))
+    if numeric_str:
+        client_id = int(numeric_str)
+    else:
+        print("id wrong")
+    if 1 <=client_id<= 1000:
+        bias=1
+    elif 1001 <=client_id<= 2000:
+        bias=4
+    elif 2001 <=client_id<= 3000:
+        bias=7
+    for i in range(0,3):
+        db=TinyDB(f'data/db_server_S{bias+i}.json')
+        balance_table=db.table('data')
+        user=Query()
+        result=balance_table.search(user.customer_id==int(client_id))
+        if result:
+            print(f"{client_id} has balance: {result[0]['balance']}")
+        else:
+            print(f"error")
+def PrintDatastore():
+    for i in range(1,10):
+        db=TinyDB(f'data/db_server_S{i}.json')
+        log_table=db.table('logs')
+        print(f"{i}th server recorded logs:")
+        print(log_table.all())
 
 if __name__ == "__main__":
 
@@ -32,15 +61,12 @@ if __name__ == "__main__":
         command = input("").strip().lower()
         command = command.split(" ")
         if command[0] == "print_balance":
-            # Pseudo code: Get client ID, then call the function to print balance
             client_id = input("ClientID: ").strip()
-            # PrintBalance(client_id)  # Please replace with your actual function
+            PrintBalance(client_id)
         elif command[0] == "print_datastore":
-            print("ok")
-            # PrintDatastore()  # Please replace with your actual function
+            PrintDatastore()
         elif command[0] == "performance":
-            print("ok")
-            # Performance()  # Please replace with your actual function
+            print(client_server.messageTime)
         elif command[0] == "exit":
             print("exit system!")
             break
