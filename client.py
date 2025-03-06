@@ -35,7 +35,7 @@ class Client:
         threading.Thread(target = lambda : self.monitor_2PC_timeout()).start()
 
 
-        print("Client started")
+        # print("Client started")
     def send(self, data):
         self.client_socket.send(data)
     
@@ -51,7 +51,7 @@ class Client:
                     self.update_leader_list(msg_data)
                 if (msg_data["type"] == "abort_raft"):
                     self.sendRaftAbort(msg_data)
-                if (msg_data["type"] == "2pc_abort"):
+                if (msg_data["type"] == "2pc_abort_from_server"):
                     self.send2pcAbort(msg_data,None)
                 if (msg_data["type"] == "2pc_can_commit"):
                     self.handle2PCcommit(msg_data)
@@ -63,7 +63,75 @@ class Client:
                             self.raftListTime.remove(e)
                     print("commit")
     
-            
+    def crashServer(self,client_id):
+        msg = {
+            "type": "crash",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int("500"+client_id)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
+    def recoverServer(self,client_id):
+        msg = {
+            "type": "recover",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int("500"+client_id)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
+    def partitionServer(self,client_id):
+        msg = {
+            "type": "partition",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int("500"+client_id)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+    
+    def partitionCluster(self,client_id):
+        this_port = None
+        if client_id == "1":
+            this_port = self.leader_list["cluster1"]
+        if client_id == "2":
+            this_port = self.leader_list["cluster2"]
+        if client_id == "3":
+            this_port = self.leader_list["cluster3"]
+        msg = {
+            "type": "partition_cluster",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int(this_port)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
+    def recoverCluster(self,client_id):
+        this_port = None
+        if client_id == "1":
+            this_port = self.leader_list["cluster1"]
+        if client_id == "2":
+            this_port = self.leader_list["cluster2"]
+        if client_id == "3":
+            this_port = self.leader_list["cluster3"]
+        msg = {
+            "type": "recover_cluster",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int(this_port)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
     
     def update_leader_list(self, msg_data):
         if msg_data["cluster"] == 1:
@@ -82,7 +150,12 @@ class Client:
             transaction_sourse = int(command[0])
             transaction_target = int(command[1])
             transaction_amount = int(command[2])
-        
+        if transaction_sourse not in range(1,3001) or transaction_target not in range(1,3001):
+            print("Invalid customer ID")
+            return
+        if transaction_amount < 0:
+            print("Invalid transaction amount")
+            return
         data = {
             "type": "",
             "transaction_sourse": transaction_sourse,
@@ -91,7 +164,7 @@ class Client:
             "command": command,
             "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
         }
-        
+        time.sleep(0.5)
         self.eventList.append(data)
         # print(self.eventList)
         
@@ -134,6 +207,7 @@ class Client:
 
     def handleMyEvent(self):
         while True:
+            time.sleep(0.8)
             if not self.eventList or self.eventList[0] is None:
                 continue
             if not self.eventList or self.eventList[0]["type"] == "2PC":
@@ -180,7 +254,7 @@ class Client:
                 client_socket.close()
                 print("init_Raft sent")
                 self.eventList.pop(0)
-                print(self.eventList)
+                # print(self.eventList)
             else:
                 msg = {
                     "type": "init_2PC",
@@ -198,6 +272,8 @@ class Client:
                 self.eventList[0]["this_sourse_cluster"]=this_sourse_cluster
                 self.eventList[0]["this_target_port"]=this_target_port
                 self.eventList[0]["this_target_cluster"]=this_target_cluster
+                self.eventList[0]["transaction_sourse_can"]=0
+                self.eventList[0]["transaction_target_can"]=0
                 self.twoPC_waitTime.append({"mid":msg["mid"],"time":time.time()}) 
                 msg = json.dumps(msg)
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -212,7 +288,7 @@ class Client:
                 self.eventList[0]["init_time"] = time.time()
                 self.twoPCList.append(self.eventList[0])
                 self.eventList.pop(0)
-                print("init_2PC sent")
+                # print("init_2PC sent")
 
     def monitor_2PC_timeout(self):
         while True:
@@ -221,7 +297,7 @@ class Client:
                 for i in self.twoPC_waitTime:
                     time_gap=time.time()-i["time"]
                     if time_gap>self.timeout_limit:
-                        print("time out, send abort 2pc")
+                        # print("time out, send abort 2pc")
                         msg_data = {}
                         mid = i["mid"]
                         self.send2pcAbort(msg_data,mid)
@@ -234,7 +310,6 @@ class Client:
                 this_mid = i["mid"]
 
         if this_event == {}:
-            print("send2pcAbort No event found")
             return
         self.raftListTime.remove(this_event)
         print("------------------Client side RaftAbort------------------")
@@ -254,8 +329,8 @@ class Client:
         if this_event == {}:
             print("send2pcAbort No event found")
             return
-        print("------------------send2pcAbort------------------")
-        print(self.twoPCList)
+        print("------------------Client side 2pc Abort------------------")
+        # print(self.twoPCList)
         msg = {
                 "type": "2pc_abort",
                 "transaction_sourse": this_event["transaction_sourse"],
@@ -276,10 +351,10 @@ class Client:
             client_socket.close()
         else:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            if (msg_data["abort_server"] == this_event["this_sourse_port"]):
-                client_socket.connect(("127.0.0.1",this_event["this_target_port"]))
-            if (msg_data["abort_server"] == this_event["this_target_port"]):
-                client_socket.connect(("127.0.0.1",this_event["this_sourse_port"]))
+            if (int(msg_data["abort_server"]) == int(this_event["this_sourse_port"])):
+                client_socket.connect(("127.0.0.1",int(this_event["this_target_port"])))
+            if (int(msg_data["abort_server"]) == int(this_event["this_target_port"])):
+                client_socket.connect(("127.0.0.1",int(this_event["this_sourse_port"])))
             client_socket.send(msg.encode())
             client_socket.close()
         self.twoPCList.remove(this_event)
@@ -287,10 +362,8 @@ class Client:
             if i["mid"] == this_mid:
                 self.twoPC_waitTime.remove(i)
 
-
+# 明天第一件事，raft计时，abort后删除log
 # 精简log传输
-# raft内同步
 # 更改2pc commit
 # abort后的log修剪
 # 杀死、partition、恢复
-# concurrent

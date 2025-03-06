@@ -12,7 +12,7 @@ import client
 from tinydb import TinyDB, Query
 
 def start_server(server_info,servers):
-    server.Server(server_info,servers)
+    return server.Server(server_info,servers)
 
 def PrintBalance(client_id):
     numeric_str = ''.join(filter(str.isdigit, client_id))
@@ -26,6 +26,9 @@ def PrintBalance(client_id):
         bias=4
     elif 2001 <=client_id<= 3000:
         bias=7
+    else:
+        print("id wrong")
+        return
     for i in range(0,3):
         db=TinyDB(f'data/db_server_S{bias+i}.json')
         balance_table=db.table('data')
@@ -40,7 +43,8 @@ def PrintDatastore():
         db=TinyDB(f'data/db_server_S{i}.json')
         log_table=db.table('logs')
         print(f"{i}th server recorded logs:")
-        print(log_table.all())
+        for log in log_table.all():
+            print(f"index: {log["index"]}opration:({log["x"]} {log["y"]} {log["amt"]})")
 
 if __name__ == "__main__":
 
@@ -53,7 +57,7 @@ if __name__ == "__main__":
     with open(config_file_path, "r") as file:
         servers = json.load(file)
     for server_info in servers:
-        print(server_info["db_file"])
+        # print(server_info["db_file"])
         Process(target=start_server, args=(server_info,servers)).start()
     client_server = client.Client(servers)
     while True:
@@ -70,7 +74,22 @@ if __name__ == "__main__":
         elif command[0] == "exit":
             print("exit system!")
             break
-        elif int(command[0]) in range(1, 3001):
+        elif command[0] == "crash":
+            client_id = input("ClientID: ").strip()
+            client_server.crashServer(client_id)
+        elif command[0] == "recover":
+            client_id = input("ClientID: ").strip()
+            client_server.recoverServer(client_id)
+        elif command[0] == "partition":
+            client_id = input("ClientID: ").strip()
+            client_server.partitionServer(client_id)
+        elif command[0] == "partition_cluster":
+            client_id = input("cluster: ").strip()
+            client_server.partitionCluster(client_id)
+        elif command[0] == "recover_cluster":
+            client_id = input("cluster: ").strip()
+            client_server.recoverCluster(client_id)
+        elif command[0].isdigit() and int(command[0]) in range(1, 3001):
             client_server.initTransactionMessage(command)
             print("ok WE GOT A NUMBER")
         else:
