@@ -35,7 +35,7 @@ class Client:
         threading.Thread(target = lambda : self.monitor_2PC_timeout()).start()
 
 
-        print("Client started")
+        # print("Client started")
     def send(self, data):
         self.client_socket.send(data)
     
@@ -63,7 +63,75 @@ class Client:
                             self.raftListTime.remove(e)
                     print("commit")
     
-            
+    def crashServer(self,client_id):
+        msg = {
+            "type": "crash",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int("500"+client_id)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
+    def recoverServer(self,client_id):
+        msg = {
+            "type": "recover",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int("500"+client_id)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
+    def partitionServer(self,client_id):
+        msg = {
+            "type": "partition",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int("500"+client_id)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+    
+    def partitionCluster(self,client_id):
+        this_port = None
+        if client_id == "1":
+            this_port = self.leader_list["cluster1"]
+        if client_id == "2":
+            this_port = self.leader_list["cluster2"]
+        if client_id == "3":
+            this_port = self.leader_list["cluster3"]
+        msg = {
+            "type": "partition_cluster",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int(this_port)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
+    def recoverCluster(self,client_id):
+        this_port = None
+        if client_id == "1":
+            this_port = self.leader_list["cluster1"]
+        if client_id == "2":
+            this_port = self.leader_list["cluster2"]
+        if client_id == "3":
+            this_port = self.leader_list["cluster3"]
+        msg = {
+            "type": "recover_cluster",
+            "client_id": client_id
+        }
+        msg = json.dumps(msg)
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(("127.0.0.1",int(this_port)))
+        client_socket.send(msg.encode())
+        client_socket.close()
+
     
     def update_leader_list(self, msg_data):
         if msg_data["cluster"] == 1:
@@ -82,7 +150,12 @@ class Client:
             transaction_sourse = int(command[0])
             transaction_target = int(command[1])
             transaction_amount = int(command[2])
-        
+        if transaction_sourse not in range(1,3001) or transaction_target not in range(1,3001):
+            print("Invalid customer ID")
+            return
+        if transaction_amount < 0:
+            print("Invalid transaction amount")
+            return
         data = {
             "type": "",
             "transaction_sourse": transaction_sourse,
@@ -91,7 +164,7 @@ class Client:
             "command": command,
             "mid":hashlib.md5(str(random.random()).encode()).hexdigest()
         }
-        
+        time.sleep(0.5)
         self.eventList.append(data)
         # print(self.eventList)
         
@@ -134,6 +207,7 @@ class Client:
 
     def handleMyEvent(self):
         while True:
+            time.sleep(0.8)
             if not self.eventList or self.eventList[0] is None:
                 continue
             if not self.eventList or self.eventList[0]["type"] == "2PC":
@@ -288,10 +362,8 @@ class Client:
             if i["mid"] == this_mid:
                 self.twoPC_waitTime.remove(i)
 
-
+# 明天第一件事，raft计时，abort后删除log
 # 精简log传输
-# raft追加时log index加了2
 # 更改2pc commit
 # abort后的log修剪
 # 杀死、partition、恢复
-# concurrent

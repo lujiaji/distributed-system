@@ -16,6 +16,7 @@ class Server:
     def __init__(self, server_info,servers):
         # Initialize some parameters
         self.crashed = False
+        self.cluster_partitioned = False
         self.partitioned_with = []
         self.server_id = server_info["server_id"]
         self.cluster = server_info["cluster"]  # Needs to be initialized
@@ -75,7 +76,7 @@ class Server:
             print(f"[{self.server_id}] init index: {self.cur_index}, init commit_index: {self.commit_index}")
         
     def as_leader_hb(self):
-        while True:
+        while True and not self.crashed:
             time.sleep(0.5)
             if self.leader==self.server_id:
                 #print(f"[{self.server_id}] send heartbeat")
@@ -86,10 +87,12 @@ class Server:
                         "ip":self.ip,
                         "port":self.port,
                         "cur_index":self.cur_index,
-                        "commit_index":self.commit_index
+                        "commit_index":self.commit_index,
                         # "commited_log_list":self.commited_logList,
                         # "log_list":self.logList
                     }
+                    if len(self.logList) != 0:
+                        message["newest_log_type"]= self.logList[len(self.logList)-1]["transaction_type"]
                     message.update(self.server_info)
                     message=json.dumps(message)
                     for other in self.others:
@@ -130,10 +133,16 @@ class Server:
                     if "server_id" in msg_data and msg_data["server_id"] == self.leader:
                         self.last_message_time=time.time()
                     if self.crashed:
-                        continue
+                        if msg_data["type"] == "recover":
+                            self.crashed = False
+                        else:
+                            continue
                     # if "server_id" in msg_data and msg_data["server_id"] == 'S2':
                     #     print(f"[{self.server_id}] receive msg from {msg_data['server_id']}, {msg_data['type']}")
                     match msg_data["type"]:
+                        case "crash":
+                            print(f"[{self.server_id}] crash!")
+                            self.crashed = True
                         case "hb":
                             # print(f"[{self.server_id}] receive hb")
                             self.checkHb(msg_data)
@@ -147,10 +156,12 @@ class Server:
                             self.handle_vote(msg_data)
                         case "init_Raft":
                             print(f"[{self.server_id}] receive in-cluster client transaction request, handling!")
-                            self.request(msg_data,"raft")
+                            if self.cluster_partitioned != True:
+                                self.request(msg_data,"raft")
                         case "init_2PC":
                             print(f"[{self.server_id}] receive x-cluster client transaction request, handling!")
-                            self.request(msg_data,"2pc")
+                            if self.cluster_partitioned != True:
+                                self.request(msg_data,"2pc")
                         case "request":
                             # print(f"[{self.server_id}] receive commit request")
                             self.reply(msg_data)
@@ -172,6 +183,15 @@ class Server:
                         case "2pc_abort":
                             print(f"[{self.server_id}] receive 2pc_abort")
                             self.twoPcAbort(msg_data)
+                        case "partition":
+                            print(f"[{self.server_id}] partitioned!")
+                            self.crashed = True
+                        case "partition_cluster":
+                            print(f"[{self.server_id}] cluster partitioned!")
+                            self.cluster_partitioned = True
+                        case "recover_cluster":
+                            print(f"[{self.server_id}] cluster recovered!")
+                            self.cluster_partitioned = False
                 
                         
             
@@ -182,7 +202,7 @@ class Server:
 
 
     def initMyStorage(self, db_file_name):
-        print("initMyStorage")
+        # print("initMyStorage")
         # this is the way to check log in storage
         # dataQuery = Query()
         # logs_result = self.storage.search(dataQuery.customer_id == 2)
@@ -221,12 +241,12 @@ class Server:
             my_socket.close()
 
     def monitor_timeout(self):
-        while True:
+        while True and not self.crashed:
             time.sleep(0.5)
             if (self.leader!=self.server_id):
                 time_gap=time.time()-self.last_message_time
                 if time_gap>self.timeout_limit:
-                    print(f"[{self.server_id}] long time no receive msgs,timeout!")
+                    # print(f"[{self.server_id}] long time no receive msgs,timeout!")
                     self.leader_exist=0
                     self.leader=None
                     self.election()
@@ -357,6 +377,8 @@ class Server:
             checkFail= True
         if msg["cur_index"][0] == self.cur_term and msg["cur_index"][1] < self.cur_index[1]:
             checkFail= True
+            if "newest_log_type" in msg and msg["cur_index"][1] + 1 == self.cur_index[1] and msg["newest_log_type"] == "2pc":
+                checkFail = False
         if checkFail== True:
             print(f"[{self.server_id}] you are not leader, you step down!")
             massage = {
@@ -450,9 +472,10 @@ class Server:
         return
     
     def excuteLog(self,log):
-        self.commited_logList.append(log)
         self.commit_index[0]=log["term"]
         self.commit_index[1]+=1
+        log["index"] = self.commit_index.copy()
+        self.commited_logList.append(log)
         query = Query()
         if log["transaction_type"]=="raft":
             x_balance = self.data_db.search(query.customer_id == log['x'])[0]['balance'] - log['amt']
@@ -507,7 +530,7 @@ class Server:
             new_x_ballance = x_data["balance"]-amt
         else:
             new_x_ballance = 1
-        if new_x_ballance > 0:
+        if new_x_ballance >= 0:
             self.cur_index[0]=self.cur_term
             self.cur_index[1]+=1
             print(f"[{self.server_id}] in request my index to {self.cur_index}")
@@ -515,7 +538,6 @@ class Server:
             this_log={}
             this_log={
                 "term":self.cur_term,
-                "index":self.cur_index,
                 "x":x,
                 "y":y,
                 "amt":amt,
@@ -526,6 +548,8 @@ class Server:
                 "2pc_confirm_sent":False
 
             }
+            this_log["index"] = [self.cur_index[0],len(self.logList)+1]
+            
             self.logList.append(this_log)
             message={
                 "type":"request",
@@ -621,7 +645,7 @@ class Server:
                     new_x_ballance = x_data["balance"]-amt
                 else:
                     new_x_ballance = 1
-                if new_x_ballance > 0:
+                if new_x_ballance >= 0:
                     #最后判断余额
                     # self.cur_index=msg["cur_index"]
                     message={
@@ -654,7 +678,7 @@ class Server:
             message=json.dumps(message)
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client_socket.connect((msg["ip"],int(msg["port"])))
-            client_socket.send(msg.encode())
+            client_socket.send(message.encode())
             client_socket.close()
         # print(f"[{self.server_id}] in reply log: {self.logList}, index: {self.cur_index}")
         
@@ -740,9 +764,11 @@ class Server:
     def twoPcAbort(self,msg):
         for log in self.logList:
             if log["mid"]==msg["mid"]:
-                # self.logList.remove(log)
+                self.logList.remove(log)
+                self.cur_index[1]-=1
                 print(f"[{self.server_id}] they ask me to abort msg {msg['mid']}")
-                return
+        for i in range(0,len(self.logList)):
+            self.logList[i]["index"][1]=i
         return
     # def sendCommit(self,msg):
         
