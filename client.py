@@ -55,10 +55,10 @@ class Client:
                     self.send2pcAbort(msg_data,None)
                 if (msg_data["type"] == "2pc_can_commit"):
                     self.handle2PCcommit(msg_data)
-                if (msg_data["type"] == "commit"):
+                if (msg_data["type"] == "this_raft_commited"):
                     for e in self.raftListTime:
                         if e["mid"]==msg_data["mid"]:
-                            msg_time=time.time()-e["init_time"]
+                            msg_time = int((time.time() - e["init_time"]) * 1000)
                             self.messageTime.append(msg_time)
                             self.raftListTime.remove(e)
                     print("commit")
@@ -201,7 +201,7 @@ class Client:
             self.twoPCList.remove(this_event)
             for i in self.twoPC_waitTime:
                 if i["mid"] == msg_data["mid"]:
-                    msg_time=time.time()-i["time"]
+                    msg_time = int((time.time() - i["time"]) * 1000)
                     self.messageTime.append(msg_time)
                     self.twoPC_waitTime.remove(i)
 
