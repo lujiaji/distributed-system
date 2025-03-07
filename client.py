@@ -17,13 +17,11 @@ class Client:
         self.twoPCList = []
         self.raftListTime = []
         self.messageTime=[]
-
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.bind(("127.0.0.1",5010))
         self.client_socket.listen(30)
         self.twoPC_waitTime = []
         self.timeout_limit=1
-
 
         threading.Thread(target = lambda : self.listening()).start()
         threading.Thread(target = lambda : self.handleMyEvent()).start()
@@ -125,7 +123,6 @@ class Client:
         client_socket.send(msg.encode())
         client_socket.close()
 
-    
     def update_leader_list(self, msg_data):
         if msg_data["cluster"] == 1:
             self.leader_list["cluster1"] = int(msg_data["leader_port"])
@@ -245,7 +242,6 @@ class Client:
                 client_socket.close()
                 print("init_Raft sent")
                 self.eventList.pop(0)
-                # print(self.eventList)
             else:
                 msg = {
                     "type": "init_2PC",
