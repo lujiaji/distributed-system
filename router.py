@@ -2,20 +2,19 @@ import socket
 import threading
 import json
 
-# only for receiving leader election and redirect msg and retrying message
 class Router:
     def __init__(self):
         self.leader_list={
             "cluster1":"",
             "cluster2":"",
             "cluster3":""
-            } # should be a list of leader port    
+            }  
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.bind(("127.0.0.1",5011))
         self.client_socket.listen(30)
         self.partitions = {"cluster1": False, "cluster2": False, "cluster3": False}
         self.crashed = False
-        self.cluster_connections = {}  # Store active connections
+        self.cluster_connections = {}
         threading.Thread(target=self.listening, daemon=True).start()
         print("Router started")
 
@@ -40,14 +39,11 @@ class Router:
                     break
                     
                 msg_data = json.loads(data)
-                
-                # Handle router being crashed
+
                 if self.crashed and msg_data["code"] != "recover":
                     response = {"status": "error", "message": "Router is crashed"}
                     client_socket.send(json.dumps(response).encode())
                     continue
-                
-                # Process messages based on code
                 if msg_data["code"] == "Leader":
                     self.leader_list[msg_data["cluster"]] = msg_data["leader_port"]
                     response = {"status": "success", "message": f"Leader updated for {msg_data['cluster']}"}
@@ -87,7 +83,6 @@ class Router:
     def crash(self):
         self.crashed = True
         print("Router crashed")
-        # Close all active connections
         for conn in list(self.cluster_connections.values()):
             try:
                 conn.close()
@@ -98,12 +93,10 @@ class Router:
     def recover(self):
         self.crashed = False
         print("Router recovered")
-        # Reset partitions
         for cluster in self.partitions:
             self.partitions[cluster] = False
 
     def print_balance(self):
-        # Contact each cluster leader to get balance information
         balance_info = {}
         for cluster, leader_port in self.leader_list.items():
             if not leader_port or self.partitions[cluster]:
@@ -111,7 +104,6 @@ class Router:
                 continue
                 
             try:
-                # Connect to the leader and request balance
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect(("127.0.0.1", int(leader_port)))
                 request = json.dumps({"code": "get_balance"})
@@ -130,7 +122,6 @@ class Router:
     def partition(self, cluster):
         self.partitions[cluster] = True
         print(f"Cluster {cluster} partitioned")
-        # Disconnect any active connections to this cluster
         if cluster in self.cluster_connections:
             try:
                 self.cluster_connections[cluster].close()
@@ -139,7 +130,6 @@ class Router:
             del self.cluster_connections[cluster]
 
     def partition_cluster(self, cluster):
-        # Similar to partition but may involve multiple clusters
         clusters = cluster.split(',')
         for c in clusters:
             if c.strip() in self.partitions:
@@ -148,7 +138,6 @@ class Router:
     def recover_cluster(self, cluster):
         self.partitions[cluster] = False
         print(f"Cluster {cluster} recovered")
-        # Re-establish connection if needed
         if cluster in self.leader_list and self.leader_list[cluster]:
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
