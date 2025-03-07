@@ -8,11 +8,6 @@ import random
 class Client:
     def __init__(self,servers):
         self.servers = servers
-        # self.leader_list={
-        #     "cluster1" : 5001,
-        #     "cluster2" : 5004,
-        #     "cluster3" : 5007
-        #     }
         self.leader_list={
             "cluster1":"",
             "cluster2":"",
@@ -34,8 +29,6 @@ class Client:
         threading.Thread(target = lambda : self.handleMyEvent()).start()
         threading.Thread(target = lambda : self.monitor_2PC_timeout()).start()
 
-
-        # print("Client started")
     def send(self, data):
         self.client_socket.send(data)
     
@@ -166,10 +159,8 @@ class Client:
         }
         time.sleep(0.5)
         self.eventList.append(data)
-        # print(self.eventList)
         
     def handle2PCcommit(self, msg_data):
-        # if (msg_data[]
         this_event = {}
         for i in self.twoPCList:
             if i["mid"] == msg_data["mid"]:
@@ -288,7 +279,6 @@ class Client:
                 self.eventList[0]["init_time"] = time.time()
                 self.twoPCList.append(self.eventList[0])
                 self.eventList.pop(0)
-                # print("init_2PC sent")
 
     def monitor_2PC_timeout(self):
         while True:
@@ -297,7 +287,6 @@ class Client:
                 for i in self.twoPC_waitTime:
                     time_gap=time.time()-i["time"]
                     if time_gap>self.timeout_limit:
-                        # print("time out, send abort 2pc")
                         msg_data = {}
                         mid = i["mid"]
                         self.send2pcAbort(msg_data,mid)
@@ -330,7 +319,6 @@ class Client:
             print("send2pcAbort No event found")
             return
         print("------------------Client side 2pc Abort------------------")
-        # print(self.twoPCList)
         msg = {
                 "type": "2pc_abort",
                 "transaction_sourse": this_event["transaction_sourse"],
@@ -361,9 +349,3 @@ class Client:
         for i in self.twoPC_waitTime:
             if i["mid"] == this_mid:
                 self.twoPC_waitTime.remove(i)
-
-# 明天第一件事，raft计时，abort后删除log
-# 精简log传输
-# 更改2pc commit
-# abort后的log修剪
-# 杀死、partition、恢复

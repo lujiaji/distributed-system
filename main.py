@@ -47,21 +47,15 @@ def PrintDatastore():
             print(f"index: {log["index"]}opration:({log["x"]} {log["y"]} {log["amt"]})")
 
 if __name__ == "__main__":
-
-    # Initialize the environment, such as loading the database, initializing servers/clients, etc.
-    # initialize_environment()  # Pseudo function, represents your initialization code
-
     print("welcome to the bank system!")
     print("command options: print_balance, print_datastore, performance, exit")
     config_file_path = "data/servers_info.json"
     with open(config_file_path, "r") as file:
         servers = json.load(file)
     for server_info in servers:
-        # print(server_info["db_file"])
         Process(target=start_server, args=(server_info,servers)).start()
     client_server = client.Client(servers)
     while True:
-        # Read input from the command line
         command = input("").strip().lower()
         command = command.split(" ")
         if command[0] == "print_balance":
