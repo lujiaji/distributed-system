@@ -48,6 +48,8 @@ def PrintDatastore():
 
 if __name__ == "__main__":
     print("welcome to the bank system!")
+    print("-----Author: Zhaohongzhi Cai, Jiaji Lu-----")
+    print("copyright reserved 2025")
     print("command options: print_balance, print_datastore, performance, exit")
     config_file_path = "data/servers_info.json"
     with open(config_file_path, "r") as file:

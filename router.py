@@ -25,7 +25,6 @@ class Router:
                 if self.crashed:
                     client_socket.close()
                     continue
-                    
                 threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
             except Exception as e:
                 if not self.crashed:
@@ -37,9 +36,7 @@ class Router:
                 data = client_socket.recv(1024).decode()
                 if not data:
                     break
-                    
                 msg_data = json.loads(data)
-
                 if self.crashed and msg_data["code"] != "recover":
                     response = {"status": "error", "message": "Router is crashed"}
                     client_socket.send(json.dumps(response).encode())
@@ -73,7 +70,6 @@ class Router:
                     response = {"status": "success", "message": f"Cluster {msg_data['cluster']} recovered"}
                 else:
                     response = {"status": "error", "message": "Unknown command"}
-                
                 client_socket.send(json.dumps(response).encode())
         except Exception as e:
             print(f"Error handling client: {e}")

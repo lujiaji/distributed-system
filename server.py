@@ -8,7 +8,6 @@ import random
 
 class Server:
     def __init__(self, server_info,servers):
-        # Initialize some parameters
         self.crashed = False
         self.cluster_partitioned = False
         self.partitioned_with = []
@@ -19,14 +18,12 @@ class Server:
         self.db_file = server_info["db_file"]
         self.server_info = server_info
         self.others=[]
-
         for server_info in servers:
             if server_info["server_id"]!=self.server_id and server_info["cluster"]==self.cluster:
                 self.others.append(server_info)
         self.data_base = self.initMyStorage(self.db_file)
         self.data_db = self.data_base.table('data')
         self.log_db = self.data_base.table('logs')
-
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.bind((self.ip,int(self.port)))
         self.socket.listen(30)
@@ -38,18 +35,15 @@ class Server:
         self.elec_id=None
         self.msg_q=[]
         self.currrent_vote_term=0
-
         self.cur_term = 0
         self.commit_index = [0, 0]
         self.cur_index = [0, 0]
         self.logList = []
         self.commited_logList = []
         self.initLog()
-
         threading.Thread(target = lambda : self.as_leader_hb()).start()
         threading.Thread(target = lambda : self.monitor_timeout()).start()
         threading.Thread(target = lambda : self.listening()).start()
-
         self.match_index = [0, 0]
 
     def initLog(self):
@@ -287,7 +281,6 @@ class Server:
 
     def handle_vote(self,msg):
         if msg["reply_to_mid"]==self.elec_id and self.pending_elec!={}:
-            #print("111")
             if msg["granted_vote"]==True:
                 self.pending_elec[self.elec_id]["others_replied"].append(True)
                 if len(self.pending_elec[self.elec_id]["others_replied"]) > 1:
@@ -345,12 +338,7 @@ class Server:
             return
         
     def checkLogConsistency(self,msg):
-        # print(f"[{self.server_id}] check log consistency")
-        # if self.logList != msg["log_list"]:
-        #     print(f"[{self.server_id}] logList is not consistent")
         if self.cur_index != msg["cur_index"]:
-            # print(f"[{self.server_id}] cur_index is not consistent")
-            # print(f"[{self.server_id}] my cur_index: {self.cur_index}, his cur_index: {msg['cur_index']}")
             massage = {
                 "type":"need_log",
                 "follower_id":self.server_id,
@@ -384,7 +372,6 @@ class Server:
         my_socket.close()
         print(f"[{self.server_id}] in sendLog my index {self.cur_index}")
 
-
     def updateLog(self,msg):
         self.cur_index = msg["cur_index"].copy()
         self.logList = msg["log_list"]
@@ -392,7 +379,6 @@ class Server:
         if len(msg["commited_log_list"]) == 0:
             print(f"[{self.server_id}] no commited logs")
             return
-
         i = len(self.commited_logList)
         while i < len(msg["commited_log_list"]):
             commited_logs_to_be_done.append(msg["commited_log_list"][i])

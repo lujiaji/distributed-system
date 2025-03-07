@@ -20,7 +20,6 @@ def create_server_database(server_id, cluster, db_file):
     logs=[]
     logs_table.insert_multiple(logs)
     data_table.insert_multiple(customers)
-    
     db.close()
 
 def main():
@@ -33,10 +32,8 @@ def main():
             cluster = 2
         else:
             cluster = 3
-
         ip_address = "127.0.0.1"
         port = f"500{i}"
-
         db_file = f"data/db_server_{server_id}.json"
         create_server_database(server_id, cluster, db_file)
         servers_info.append({
@@ -48,7 +45,6 @@ def main():
         })
     with open("data/servers_info.json", "w") as f:
         json.dump(servers_info, f, indent=4)
-    
     print("Initialization complete: 9 server database files and servers_info.json file created.")
 
 if __name__ == "__main__":
