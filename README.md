@@ -1,6 +1,3 @@
-﻿# 271-final
-no copy, thanks!
-If you see this, means we don't want to public our code temporally.
-Someday we will public this, welcome to star~
-
-You are welcome.
+﻿# CS271-Distributed System
+ I build a bank system that can support multiple servers and thousands of clients to do transactions.
+ Based on Paxos architecture.
